@@ -20,11 +20,14 @@ int NUM_SENSORS = 8;
 float WEIGHTS_8421_4[] = {-8, -4, -2, -1, 1, 2, 4, 8, 4};
 float WEIGHTS_1514128_8[] = {-15, -14, -12, -8, 8, 12, 14, 15, 8};
 
-uint16_t sensor_vals[8];
+uint16_t sensor_max_vals[] = {1916, 1813, 1903, 1232, 1321, 1870, 1657, 1715};
+uint16_t sensor_min_vals[] = {576, 537, 597, 620, 506, 630, 597, 785};
+uint16_t sensor_vals[NUM_SENSORS];
 int left_speed;
 int right_speed;
 float curr_error;
 float prev_error = 0;
+float total_error = 0;
 
 void setup() {
   // Initialize motor pins
@@ -53,7 +56,7 @@ void loop() {
   // Calculate error
   curr_error = 0;
   for(int i = 0; i < NUM_SENSORS; i++) {
-    curr_error += (sensor_vals[i] * WEIGHTS_8421_4[i]) / WEIGHTS_8421_4[NUM_SENSORS];
+    curr_error += (((sensor_vals[i] - sensor_min_vals[i]) * 1000) / sensor_max_vals[i]) * WEIGHTS_8421_4[i] / WEIGHTS_8421_4[NUM_SENSORS];
   }
 
   
@@ -61,6 +64,7 @@ void loop() {
   analogWrite(LEFT_PWM_PIN, left_speed);
   analogWrite(RIGHT_PWM_PIN, right_speed);
 
+  total_error += curr_error;
   prev_error = curr_error;
   
 //  // print the sensor values as numbers from 0 to 2500, where 0 means maximum reflectance and
