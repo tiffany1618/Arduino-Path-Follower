@@ -8,21 +8,25 @@ const int RIGHT_DIR_PIN = 30;
 const int LEFT_PWM_PIN = 40;
 const int RIGHT_PWM_PIN = 39;
 
-const int LED_RF = 41;
+const int LED_FL = 51;
+const int LED_FR = 41;
 const int LED_BL = 57;
+const int LED_BR = 58;
 
 // PID Terms
-const float K_P = 60.0;
+const float K_P = 0.0;
 const float K_I = 0.0;
 const float K_D = 0.0;
 
 int NUM_SENSORS = 8;
-float WEIGHTS_8421_4[] = {-8, -4, -2, -1, 1, 2, 4, 8, 4};
-float WEIGHTS_1514128_8[] = {-15, -14, -12, -8, 8, 12, 14, 15, 8};
+float WEIGHTS_8421_4[] = { -8, -4, -2, -1, 1, 2, 4, 8, 4};
+float WEIGHTS_1514128_8[] = { -15, -14, -12, -8, 8, 12, 14, 15, 8};
+int BASE_SPEED = 60;
 
 uint16_t sensor_max_vals[] = {1916, 1813, 1903, 1232, 1321, 1870, 1657, 1715};
 uint16_t sensor_min_vals[] = {576, 537, 597, 620, 506, 630, 597, 785};
 uint16_t sensor_vals[NUM_SENSORS];
+float turn_angle; // Degrees
 int left_speed;
 int right_speed;
 float curr_error;
@@ -42,9 +46,9 @@ void setup() {
   digitalWrite(RIGHT_NSLP_PIN, HIGH);
   digitalWrite(LEFT_DIR_PIN, LOW);
   digitalWrite(RIGHT_DIR_PIN, HIGH);
-  
+
   ECE3_Init();
-  
+
   Serial.begin(9600); // set the data rate in bits per second for serial data transmission
 }
 
@@ -55,28 +59,56 @@ void loop() {
 
   // Calculate error
   curr_error = 0;
-  for(int i = 0; i < NUM_SENSORS; i++) {
+  for (int i = 0; i < NUM_SENSORS; i++) {
     curr_error += (((sensor_vals[i] - sensor_min_vals[i]) * 1000) / sensor_max_vals[i]) * WEIGHTS_8421_4[i] / WEIGHTS_8421_4[NUM_SENSORS];
   }
 
-  
+  turn_angle = K_P * curr_error + K_I * total_error + K_D * (curr_error - prev_error);
 
   analogWrite(LEFT_PWM_PIN, left_speed);
   analogWrite(RIGHT_PWM_PIN, right_speed);
 
   total_error += curr_error;
   prev_error = curr_error;
-  
-//  // print the sensor values as numbers from 0 to 2500, where 0 means maximum reflectance and
-//  // 2500 means minimum reflectance
-//  for (unsigned char i = 0; i < 8; i++)
-//  {
-//    Serial.print(sensorValues[i]);
-//    Serial.print('\t'); // tab to format the raw data into columns in the Serial monitor
-//  }
-//  Serial.println();
+
+  //  // print the sensor values as numbers from 0 to 2500, where 0 means maximum reflectance and
+  //  // 2500 means minimum reflectance
+  //  for (unsigned char i = 0; i < 8; i++)
+  //  {
+  //    Serial.print(sensorValues[i]);
+  //    Serial.print('\t'); // tab to format the raw data into columns in the Serial monitor
+  //  }
+  //  Serial.println();
 }
 
-double pid_controller(double k_p, double k_i, double k_d) {
-  
+void min_calibrate() {
+  for(int i = 0; i < 5; i++) {
+    ECE3_read_IR(sensor_vals);
+
+    if(sensor_vals[i] < sensor_min_vals[i]) {
+      sensor_min_vals[i] = sensor_vals[i];
+    }
+  }
+
+  digitalWrite(LED_FR, HIGH);
+  delay(500);
+  digitalWrite(LED_FR, LOW);
+}
+
+void max_calibrate() {
+  for(int i = 0; i < 5; i++) {
+    ECE3_read_IR(sensor_vals);
+
+    if(sensor_vals[i] > sensor_max_vals[i]) {
+      sensor_max_vals[i] = sensor_vals[i];
+    }
+  }
+
+  digitalWrite(LED_BR, HIGH);
+  delay(500);
+  digitalWrite(LED_BR, LOW);
+  delay(500);
+  digitalWrite(LED_BR, HIGH);
+  delay(500);
+  digitalWrite(LED_BR, LOW);
 }
