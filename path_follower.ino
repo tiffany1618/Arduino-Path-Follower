@@ -21,7 +21,7 @@ const int LED_BR = 58;
 const double K_P = 0.01;
 const double K_I = 0.0;
 const double K_D = 0.0;
-const double ERROR_THRESHOLD = 100; // Set error to 0 if the absolute value of the error is less than this threshold, to prevent small oscillations
+const double ERROR_THRESHOLD = 0; // Set error to 0 if the absolute value of the error is less than this threshold, to prevent small oscillations
 
 // Other constants
 const int NUM_SENSORS = 8; // Number of sensors on the car
@@ -32,8 +32,10 @@ const int SENSOR_THRESHOLD = 10; // 1% margin of error for determining whether s
 float WEIGHTS_8421_4[] = { -8, -4, -2, -1, 1, 2, 4, 8, 4};
 float WEIGHTS_1514128_8[] = { -15, -14, -12, -8, 8, 12, 14, 15, 8};
 
-uint16_t sensor_max_vals[] = {1916, 1813, 1903, 1232, 1321, 1870, 1657, 1715};
-uint16_t sensor_min_vals[] = {576, 537, 597, 620, 506, 630, 597, 785};
+//int sensor_max_vals[] = {1916, 1813, 1903, 1232, 1321, 1870, 1657, 1715};
+//int sensor_min_vals[] = {576, 537, 597, 620, 506, 630, 597, 785};
+int sensor_max_vals[] = {0, 0, 0, 0, 0, 0, 0, 0};
+int sensor_min_vals[] = {0, 0, 0, 0, 0, 0, 0, 0};
 uint16_t sensor_vals[NUM_SENSORS];
 
 double norm_val; // Stores normalized sensor value
@@ -62,6 +64,8 @@ void setup() {
   pinMode(RIGHT_DIR_PIN, OUTPUT);
   pinMode(LEFT_PWM_PIN, OUTPUT);
   pinMode(RIGHT_PWM_PIN, OUTPUT);
+  pinMode(LEFT_BUTTON, INPUT_PULLUP);
+  pinMode(RIGHT_BUTTON, INPUT_PULLUP);
 
   digitalWrite(LEFT_NSLP_PIN, HIGH);
   digitalWrite(RIGHT_NSLP_PIN, HIGH);
@@ -84,28 +88,48 @@ void setup() {
 
   right_button_state = false;
   left_button_state = false;
-  
-  pid.set_time();
 }
 
 
 void loop() {
   // deal with buttons
   if (digitalRead(RIGHT_BUTTON) == LOW) {
-    toggle_state(right_button_state, LED_FR);
+    toggle_state(&right_button_state, LED_FR);
   }
 
   if (digitalRead(LEFT_BUTTON) == LOW) {
-    toggle_state(left_button_state, LED_FL);
+    toggle_state(&left_button_state, LED_FL);
+    pid.set_time();
   }
   
   if (should_stop) {
-    stop();
+    stop_car();
   } else if (right_button_state) {
-    min_calibrate();
-    delay(5000);
-    max_calibrate();
-    delay(5000);
+    calibrate(sensor_min_vals);
+
+    // Delay for 5 seconds to allow time to position car.
+    // The built-in delay() function appeared to alter the behavior of the millis() function, so I chose avoid using delay()
+    bool stop_loop = false;
+    unsigned long start_time = millis();
+    unsigned long interval = 5000;
+
+    while (!stop_loop) {
+      if (millis() >= start_time + interval) {
+        stop_loop = true;
+      }
+    }
+
+    calibrate(sensor_max_vals);
+    toggle_state(&right_button_state, LED_FR);
+
+    Serial.println("Min");
+    for (int i = 0; i < NUM_SENSORS; i++) {
+      Serial.println(sensor_min_vals[i]);
+    }
+    Serial.println("Max");
+    for (int i = 0; i < NUM_SENSORS; i++) {
+      Serial.println(sensor_max_vals[i]);
+    }  
   } else if (left_button_state) {
     // Read raw sensor values
     ECE3_read_IR(sensor_vals);
@@ -118,83 +142,82 @@ void loop() {
       error += norm_val * WEIGHTS_8421_4[i] / WEIGHTS_8421_4[NUM_SENSORS];
     }
 
-    // Determine if car should stop
-    if ((1000 - sensor_avg) < SENSOR_THRESHOLD) {
-      was_over_black = true;
-    } else {
-      was_over_black = false;
-    }
-    
-    if ((sensor_avg < SENSOR_THRESHOLD) && was_over_black) {
-      should_stop = true;
-    }
+//    // Determine if car should stop
+//    if ((1000 - sensor_avg) < SENSOR_THRESHOLD) {
+//      was_over_black = true;
+//    } else {
+//      was_over_black = false;
+//    }
+//    
+//    if ((sensor_avg < SENSOR_THRESHOLD) && was_over_black) {
+//      should_stop = true;
+//    }
   
-    Serial.println(error);
+//    Serial.print("Error: ");
+//    Serial.println(error);
+
+    pid.calculate();
+    
+//    Serial.print("Output: ");
+//    Serial.println(speed_change);
   
     // Adjust wheel speeds based on the output of the PID controller
-    pid.calculate();
-    analogWrite(LEFT_PWM_PIN, BASE_SPEED - speed_change);
-    analogWrite(RIGHT_PWM_PIN, BASE_SPEED + speed_change);
+//    analogWrite(LEFT_PWM_PIN, BASE_SPEED - speed_change);
+//    analogWrite(RIGHT_PWM_PIN, BASE_SPEED + speed_change);
   }
 }
 
 // Stop the car
-void stop() {
+void stop_car() {
   analogWrite(LEFT_PWM_PIN, 0);
   analogWrite(RIGHT_PWM_PIN, 0);
 }
 
-void reset(uint16_t *vals) {
+void reset(int *vals) {
   for (int i = 0; i < NUM_SENSORS; i++) {
     vals[i] = 0;
   }
 }
 
-void min_calibrate() {
-  reset(sensor_min_vals);
-  
-  for (int i = 0; i < 5; i++) {
+void calibrate(int *vals) {
+  for (int i = 0; i < 10; i++) {
     ECE3_read_IR(sensor_vals);
 
     for (int j = 0; j < NUM_SENSORS; j++) {
-      sensor_min_vals[j] += sensor_vals[j] / 5;
+      vals[j] += sensor_vals[j] / 10;
     }
   }
 
   blink_twice(LED_BL);
 }
 
-void max_calibrate() {
-  reset(sensor_max_vals);
-  
-  for (int i = 0; i < 5; i++) {
-    ECE3_read_IR(sensor_vals);
-
-    for (int j = 0; j < NUM_SENSORS; j++) {
-      sensor_max_vals[j] += sensor_vals[j] / 5;
-    }
-  }
-
-  blink_twice(LED_BR);
-}
-
 // Toggle state of button
 void toggle_state(bool *state, int led_pin) {
   if (*state) {
-    (*state) = false;
+    *state = false;
     digitalWrite(led_pin, LOW);
   } else {
-    (*state) = true;
+    *state = true;
     digitalWrite(led_pin, HIGH);
   }
 }
 
+// Blink LED twice at 1 second interval
 void blink_twice(int pin) {
-  digitalWrite(pin, HIGH);
-  delay(500);
-  digitalWrite(pin, LOW);
-  delay(500);
-  digitalWrite(pin, HIGH);
-  delay(500);
-  digitalWrite(pin, LOW);
+  bool stop_loop = false;
+  unsigned long start_time = millis();
+  unsigned long interval = 500;
+
+  while (!stop_loop) {
+    if (millis() >= start_time + (interval * 4)) {
+      digitalWrite(pin, LOW);
+      stop_loop = true;
+    } else if (millis() >= start_time + (interval * 3)) {
+      digitalWrite(pin, HIGH);
+    } else if (millis() >= start_time + (interval * 2)) {
+      digitalWrite(pin, LOW);
+    } else if (millis() >= start_time + interval) {
+      digitalWrite(pin, HIGH);
+    }
+  }
 }
