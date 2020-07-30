@@ -3,3 +3,5 @@ data/
 cmake-build-debug/
 __pycache__/
 .idea/
+
+pid_data/
