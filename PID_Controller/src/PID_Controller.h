@@ -7,16 +7,19 @@
 
 #include "Arduino.h"
 
+#include <string>
+
 class PID_Controller {
 public:
     PID_Controller(double *error, double *output, double threshold);
     PID_Controller(double *error, double *output, double threshold, double K_P, double K_I, double K_D);
 
-    void set_time();
     void set_gains(double K_P, double K_I, double K_D);
+    void reset_time();
+    void reset_values();
 
     double tune(double step);
-    void set_tuned_gains();
+    void set_tuned_gains(double K_u, double T_u);
 
     void calculate();
 
@@ -30,11 +33,8 @@ private:
     double *output;
     double prev_error;
     double tot_error;
-    long prev_time;
-
-    // Tuning
-    double K_u; // Ultimate gain
-    double T_u; // Period of oscillation at K_u
+    unsigned long prev_time;
+    unsigned long initial_time;
 };
 
 #endif //ROBOT_PID_CONTROLLER_H
