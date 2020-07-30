@@ -21,21 +21,26 @@ const int LED_BR = 58;
 const double K_P = 0.01;
 const double K_I = 0.0;
 const double K_D = 0.0;
-const double ERROR_THRESHOLD = 0; // Set error to 0 if the absolute value of the error is less than this threshold, to prevent small oscillations
+const double ERROR_THRESHOLD = 100; // Set error to 0 if the absolute value of the error is less than this threshold, to prevent small oscillations
 
 // Other constants
 const int NUM_SENSORS = 8; // Number of sensors on the car
 const int BASE_SPEED = 60; // Default wheel speed
-const int SENSOR_THRESHOLD = 10; // 1% margin of error for determining whether sensors read black or white
+const int SENSOR_THRESHOLD_WHITE = 100;
+const int SENSOR_THRESHOLD_DIFF = 300;
 
 // Weighting schemes for sensor fusion. Last number is the divisor.
 float WEIGHTS_8421_4[] = { -8, -4, -2, -1, 1, 2, 4, 8, 4};
 float WEIGHTS_1514128_8[] = { -15, -14, -12, -8, 8, 12, 14, 15, 8};
 
+// 11 am readings
 //int sensor_max_vals[] = {1916, 1813, 1903, 1232, 1321, 1870, 1657, 1715};
 //int sensor_min_vals[] = {576, 537, 597, 620, 506, 630, 597, 785};
-int sensor_max_vals[] = {0, 0, 0, 0, 0, 0, 0, 0};
-int sensor_min_vals[] = {0, 0, 0, 0, 0, 0, 0, 0};
+// 6 pm readings
+int sensor_max_vals[] = {2500, 2500, 2500, 2453, 2353, 2500, 2500, 2500};
+int sensor_min_vals[] = {576, 555, 613, 622, 542, 647, 613, 756};
+//int sensor_max_vals[NUM_SENSORS];
+//int sensor_min_vals[NUM_SENSORS];
 uint16_t sensor_vals[NUM_SENSORS];
 
 double norm_val; // Stores normalized sensor value
@@ -43,9 +48,7 @@ double speed_change; // Stores output of PID controller
 double error;
 
 // Determine whether the car should be stopped
-bool should_stop;
-bool was_over_black;
-double sensor_avg;
+double sensor_sum;
 
 // Keep track of button states
 bool right_button_state;
@@ -74,37 +77,28 @@ void setup() {
 
   Serial.begin(9600); // set the data rate in bits per second for serial data transmission
 
-//  min_calibrate();
-//  delay(5000);
-//  max_calibrate();
-//  delay(3000);
-
-  // Initialize important values
-  speed_change = 0;
-  
-  should_stop = false;
-  was_over_black = false;
-  sensor_avg = 0;
-
   right_button_state = false;
   left_button_state = false;
 }
 
 
 void loop() {
-  // deal with buttons
+  // Get button input
   if (digitalRead(RIGHT_BUTTON) == LOW) {
     toggle_state(&right_button_state, LED_FR);
   }
 
   if (digitalRead(LEFT_BUTTON) == LOW) {
     toggle_state(&left_button_state, LED_FL);
+
+    // Set initial values
+    speed_change = 0;
+
+    pid.reset_values();
     pid.set_time();
   }
-  
-  if (should_stop) {
-    stop_car();
-  } else if (right_button_state) {
+
+  if (right_button_state) {
     calibrate(sensor_min_vals);
 
     // Delay for 5 seconds to allow time to position car.
@@ -129,41 +123,44 @@ void loop() {
     Serial.println("Max");
     for (int i = 0; i < NUM_SENSORS; i++) {
       Serial.println(sensor_max_vals[i]);
-    }  
+    } 
   } else if (left_button_state) {
     // Read raw sensor values
     ECE3_read_IR(sensor_vals);
 
     // Calculate error
     error = 0;
+    sensor_sum = 0;
+    double sensor_min = 2500;
+    double sensor_max = 0;
     for (int i = 0; i < NUM_SENSORS; i++) {
       norm_val = ((sensor_vals[i] - sensor_min_vals[i]) * 1000) / sensor_max_vals[i];
-      sensor_avg += norm_val / NUM_SENSORS;
       error += norm_val * WEIGHTS_8421_4[i] / WEIGHTS_8421_4[NUM_SENSORS];
+
+      sensor_sum += norm_val;
+      if (sensor_min > sensor_vals[i]) {
+        sensor_min = sensor_vals[i];
+      }
+      if (sensor_max < sensor_vals[i]) {
+        sensor_max = sensor_vals[i];
+      }
     }
 
-//    // Determine if car should stop
-//    if ((1000 - sensor_avg) < SENSOR_THRESHOLD) {
-//      was_over_black = true;
-//    } else {
-//      was_over_black = false;
-//    }
-//    
-//    if ((sensor_avg < SENSOR_THRESHOLD) && was_over_black) {
-//      should_stop = true;
-//    }
-  
-//    Serial.print("Error: ");
-//    Serial.println(error);
-
-    pid.calculate();
+    Serial.print("Sum: ");
+    Serial.println(sensor_sum);
+    Serial.print("Diff: ");
+    Serial.println(sensor_max - sensor_min);
     
-//    Serial.print("Output: ");
-//    Serial.println(speed_change);
+    if ((sensor_sum <= SENSOR_THRESHOLD_WHITE) && (sensor_max - sensor_min <= SENSOR_THRESHOLD_DIFF)) {
+      stop_car();
+      toggle_state(&left_button_state, LED_FL);
+    } else {
+      pid.calculate();
   
-    // Adjust wheel speeds based on the output of the PID controller
-//    analogWrite(LEFT_PWM_PIN, BASE_SPEED - speed_change);
-//    analogWrite(RIGHT_PWM_PIN, BASE_SPEED + speed_change);
+      // Adjust wheel speeds based on the output of the PID controller
+      analogWrite(LEFT_PWM_PIN, BASE_SPEED - speed_change);
+      analogWrite(RIGHT_PWM_PIN, BASE_SPEED + speed_change);
+    }
   }
 }
 
@@ -173,13 +170,10 @@ void stop_car() {
   analogWrite(RIGHT_PWM_PIN, 0);
 }
 
-void reset(int *vals) {
-  for (int i = 0; i < NUM_SENSORS; i++) {
-    vals[i] = 0;
-  }
-}
-
+// Calibrates maximum and minimum values for each of the sensors
 void calibrate(int *vals) {
+  zero(vals);
+  
   for (int i = 0; i < 10; i++) {
     ECE3_read_IR(sensor_vals);
 
@@ -191,7 +185,14 @@ void calibrate(int *vals) {
   blink_twice(LED_BL);
 }
 
-// Toggle state of button
+// Sets all values of array to 0
+void zero(int *vals) {
+  for (int i = 0; i < NUM_SENSORS; i++) {
+    vals[i] = 0;
+  }
+}
+
+// Toggle state of button and corresponding LED indicator
 void toggle_state(bool *state, int led_pin) {
   if (*state) {
     *state = false;
