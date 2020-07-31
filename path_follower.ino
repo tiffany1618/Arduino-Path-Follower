@@ -26,7 +26,7 @@ const int BUMP_4 = 8;
 const int BUMP_5 = 28;
 
 // PID Terms
-double K_P = 0.027;
+double K_P = 0.025;
 const double K_I = 0.0;
 const double K_D = 0.0;
 const double ERROR_THRESHOLD = 0; // Set error to 0 if the absolute value of the error is less than this threshold, to prevent small oscillations
@@ -109,18 +109,15 @@ void setup() {
 
 
 void loop() {
-  set_speed(90);
-  
   // Get button input
   if (digitalRead(RIGHT_BUTTON) == LOW) {
-    toggle_state(&right_button_state, LED_FR);
+    run_calibration();
   }
 
   if (digitalRead(LEFT_BUTTON) == LOW) {
-    toggle_state(&left_button_state, LED_FL);
-    reset_car();
+    follow_path();
   }
-
+  
   // Get bumper switch input (for PID tuning)
   for (int i = 0; i < 6; i++) {
     if (bump_switch[i].read() == 0) {
@@ -146,56 +143,72 @@ void loop() {
           blink_twice(LED_FR);
           break;
         case 5:
-          BASE_SPEED -= 10;
-          blink_twice(LED_FL);
           break;
       }
     }
   }
+}
 
-  if (right_button_state) {
-    calibrate(sensor_min_vals);
+void run_calibration() {
+  digitalWrite(LED_FR, HIGH);
+  calibrate(sensor_min_vals);
 
-    // Delay for 5 seconds to allow time to position car.
-    delay_milli(5000);
-    
-    calibrate(sensor_max_vals);
-    toggle_state(&right_button_state, LED_FR);
-  } else if (left_button_state) {
+  // Delay for 5 seconds to allow time to position car.
+  delay_milli(5000);
+  
+  calibrate(sensor_max_vals);
+  digitalWrite(LED_FR, LOW);
+}
+
+void follow_path() {
+  Serial.print("K_P: ");
+  Serial.println(K_P);
+
+  delay_milli(1000);
+  digitalWrite(LED_FL, HIGH);
+  reset_car();
+  
+  while (true) {
     // Read raw sensor values
     ECE3_read_IR(sensor_vals);
 
     // Calculate error
     error = 0;
-//    sensor_sum = 0;
-//    sensor_min = 2500;
-//    sensor_max = 0;
+    sensor_sum = 0;
+    sensor_min = 2500;
+    sensor_max = 0;
     for (int i = 0; i < NUM_SENSORS; i++) {
       norm_val = ((sensor_vals[i] - sensor_min_vals[i]) * 1000) / sensor_max_vals[i];
       error += norm_val * WEIGHTS_8421_4[i] / WEIGHTS_8421_4[NUM_SENSORS];
 
-//      sensor_sum += norm_val;
-//      if (sensor_min > sensor_vals[i]) {
-//        sensor_min = sensor_vals[i];
-//      }
-//      if (sensor_max < sensor_vals[i]) {
-//        sensor_max = sensor_vals[i];
-//      }
+      sensor_sum += norm_val;
+      if (sensor_min > sensor_vals[i]) {
+        sensor_min = sensor_vals[i];
+      }
+      if (sensor_max < sensor_vals[i]) {
+        sensor_max = sensor_vals[i];
+      }
     }
     
-//    if ((sensor_sum <= SENSOR_THRESHOLD_WHITE) && (sensor_max - sensor_min <= SENSOR_THRESHOLD_DIFF)) {
-//      set_speed(0);
-//      toggle_state(&left_button_state, LED_FL);
-//    } 
-//    else {
-////      pid.calculate();
-//        pid.tune();
-//          
-//      // Adjust wheel speeds based on the output of the PID controller
-//      analogWrite(LEFT_PWM_PIN, BASE_SPEED - speed_change);
-//      analogWrite(RIGHT_PWM_PIN, BASE_SPEED + speed_change);
-//    }
+    if ((sensor_sum <= SENSOR_THRESHOLD_WHITE) && (sensor_max - sensor_min <= SENSOR_THRESHOLD_DIFF)) {
+      set_speed(0);
+      toggle_state(&left_button_state, LED_FL);
+    } 
+    else {
+//      pid.calculate();
+        pid.tune();
+
+//        Serial.print(getEncoderCount_left());
+//        Serial.print(", ");
+//        Serial.println(getEncoderCount_right());
+          
+      // Adjust wheel speeds based on the output of the PID controller
+      analogWrite(LEFT_PWM_PIN, BASE_SPEED - speed_change);
+      analogWrite(RIGHT_PWM_PIN, BASE_SPEED + speed_change);
+    }
   }
+
+  digitalWrite(LED_FR, LOW);
 }
 
 // Reset PID and Encoder values
