@@ -34,7 +34,7 @@ const double ERROR_THRESHOLD = 0; // Set error to 0 if the absolute value of the
 // Encoder values
 //const int STRAIGHT_COUNT;
 //const int RIBBON_COUNT;
-//const int ABOUT_FACE_COUNT;
+const int ABOUT_FACE_COUNT_LEFT = 330;
 
 // Other constants
 const int NUM_SENSORS = 8; // Number of sensors on the car
@@ -101,7 +101,7 @@ void setup() {
   digitalWrite(LEFT_DIR_PIN, LOW);
   digitalWrite(RIGHT_DIR_PIN, LOW);
 
-  Serial.begin(9600); // set the data rate in bits per second for serial data transmission
+  Serial.begin(9600); // Set the data rate in bits per second for serial data transmission
 
   right_button_state = false;
   left_button_state = false;
@@ -109,7 +109,7 @@ void setup() {
 
 
 void loop() {
-  about_face();
+  set_speed(90);
   
   // Get button input
   if (digitalRead(RIGHT_BUTTON) == LOW) {
@@ -118,14 +118,7 @@ void loop() {
 
   if (digitalRead(LEFT_BUTTON) == LOW) {
     toggle_state(&left_button_state, LED_FL);
-
-    speed_change = 0;
-
-    resetEncoderCount_left();
-    resetEncoderCount_right();
-
-    pid.reset_values();
-    pid.reset_time();
+    reset_car();
   }
 
   // Get bumper switch input (for PID tuning)
@@ -174,40 +167,52 @@ void loop() {
 
     // Calculate error
     error = 0;
-    sensor_sum = 0;
-    sensor_min = 2500;
-    sensor_max = 0;
+//    sensor_sum = 0;
+//    sensor_min = 2500;
+//    sensor_max = 0;
     for (int i = 0; i < NUM_SENSORS; i++) {
       norm_val = ((sensor_vals[i] - sensor_min_vals[i]) * 1000) / sensor_max_vals[i];
       error += norm_val * WEIGHTS_8421_4[i] / WEIGHTS_8421_4[NUM_SENSORS];
 
-      sensor_sum += norm_val;
-      if (sensor_min > sensor_vals[i]) {
-        sensor_min = sensor_vals[i];
-      }
-      if (sensor_max < sensor_vals[i]) {
-        sensor_max = sensor_vals[i];
-      }
+//      sensor_sum += norm_val;
+//      if (sensor_min > sensor_vals[i]) {
+//        sensor_min = sensor_vals[i];
+//      }
+//      if (sensor_max < sensor_vals[i]) {
+//        sensor_max = sensor_vals[i];
+//      }
     }
     
-    if ((sensor_sum <= SENSOR_THRESHOLD_WHITE) && (sensor_max - sensor_min <= SENSOR_THRESHOLD_DIFF)) {
-      stop_car();
-      toggle_state(&left_button_state, LED_FL);
-    } else {
-//      pid.calculate();
-        pid.tune();
-          
-      // Adjust wheel speeds based on the output of the PID controller
-      analogWrite(LEFT_PWM_PIN, BASE_SPEED - speed_change);
-      analogWrite(RIGHT_PWM_PIN, BASE_SPEED + speed_change);
-    }
+//    if ((sensor_sum <= SENSOR_THRESHOLD_WHITE) && (sensor_max - sensor_min <= SENSOR_THRESHOLD_DIFF)) {
+//      set_speed(0);
+//      toggle_state(&left_button_state, LED_FL);
+//    } 
+//    else {
+////      pid.calculate();
+//        pid.tune();
+//          
+//      // Adjust wheel speeds based on the output of the PID controller
+//      analogWrite(LEFT_PWM_PIN, BASE_SPEED - speed_change);
+//      analogWrite(RIGHT_PWM_PIN, BASE_SPEED + speed_change);
+//    }
   }
 }
 
-// Stop the car
-void stop_car() {
-  analogWrite(LEFT_PWM_PIN, 0);
-  analogWrite(RIGHT_PWM_PIN, 0);
+// Reset PID and Encoder values
+void reset_car() {
+  speed_change = 0;
+
+  resetEncoderCount_left();
+  resetEncoderCount_right();
+
+  pid.reset_values();
+  pid.reset_time();
+}
+
+// Set both wheels to the same speed
+void set_speed(int speed) {
+  analogWrite(LEFT_PWM_PIN, speed);
+  analogWrite(RIGHT_PWM_PIN, speed);
 }
 
 // Turn car 180 degrees around
@@ -216,13 +221,8 @@ void about_face() {
   resetEncoderCount_left();
   resetEncoderCount_right();
 
-  Serial.print(getEncoderCount_left());
-  Serial.print(", ");
-  Serial.println(getEncoderCount_right());
-
-  while (true) {
-    analogWrite(LEFT_PWM_PIN, 90);
-    analogWrite(RIGHT_PWM_PIN, 90);
+  while (getEncoderCount_left() <= ABOUT_FACE_COUNT_LEFT) {
+    set_speed(BASE_SPEED);
   }
 
   digitalWrite(LEFT_DIR_PIN, LOW);
