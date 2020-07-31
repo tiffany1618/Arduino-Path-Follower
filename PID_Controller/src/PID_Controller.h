@@ -7,8 +7,6 @@
 
 #include "Arduino.h"
 
-#include <string>
-
 class PID_Controller {
 public:
     PID_Controller(double *error, double *output, double threshold);
@@ -18,7 +16,7 @@ public:
     void reset_time();
     void reset_values();
 
-    double tune(double step);
+    void tune();
     void set_tuned_gains(double K_u, double T_u);
 
     void calculate();

@@ -5,12 +5,7 @@
 #include "Arduino.h"
 #include "PID_Controller.h"
 
-#include <string>
 #include <cmath>
-#include <iostream>
-#include <fstream>
-
-using std::string;
 
 PID_Controller::PID_Controller(double *error, double *output, double threshold) {
     this->K_P = 0;
@@ -52,7 +47,7 @@ void PID_Controller::reset_values() {
     tot_error = 0;
 }
 
-double PID_Controller::tune(double step) {
+void PID_Controller::tune() {
     calculate();
 
     Serial.print(prev_time - initial_time);
