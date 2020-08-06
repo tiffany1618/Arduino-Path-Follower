@@ -122,21 +122,23 @@ def min_sub_to_normalized(filename):
 def data_fusion(filename):
     weights_8421_4 = np.array([-8, -4,  -2, -1, 1, 2, 4, 8], dtype='f') / 4.0
     weights_1514128_8 = np.array([-15, -14, -12, -8, 8, 12, 14, 15], dtype='f') / 8.0
+    weights_linear = np.array([-4, -3, -2, -1, 1, 2, 3, 4], dtype='f') / 4.0
 
     with open(os.path.join(PATH, filename), "r") as norm_data, open(os.path.join(PATH, "fusion_output.csv"), "w") as fusion_data:
         reader = csv.reader(norm_data)
         writer = csv.writer(fusion_data)
-        row_weights = [0, 0]
-        writer.writerow(["(8-4-2-1)/4", "(15-14-12-8)/8"])
+        row_weights = [0, 0, 0]
+        writer.writerow(["(8-4-2-1)/4", "(15-14-12-8)/8", 'linear'])
 
         next(reader)
         for row in reader:
             for i in range(NUM_SENSORS):
                 row_weights[0] += weights_8421_4[i] * float(row[i])
                 row_weights[1] += weights_1514128_8[i] * float(row[i])
+                row_weights[2] += weights_linear[i] * float(row[i])
 
             writer.writerow(row_weights)
-            row_weights = [0, 0]
+            row_weights = [0, 0, 0]
 
 
 def graph_csv(filename, graph_name):
