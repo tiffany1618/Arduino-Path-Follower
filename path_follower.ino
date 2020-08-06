@@ -1,6 +1,5 @@
 #include <PID_Controller.h>
 #include <ECE3.h>
-#include <Bump_Switch.h>
 
 // Pin values
 const int LEFT_NSLP_PIN = 31;
@@ -19,36 +18,32 @@ const int LED_BL = 57;
 const int LED_BR = 58;
 
 // PID Terms
-const double K_P = 0.05;
+const double K_P = 0.055;
 const double K_I = 0.0;
-const double K_D = 4.9;
+const double K_D = 5.2;
 const double ERROR_THRESHOLD = 0; // Set error to 0 if the absolute value of the error is less than this threshold, to prevent small oscillations
 
 // Encoder values
-//const int STRAIGHT_COUNT_LEFT = ;
-//const int STRAIGHT_COUNT_RIGHT = ;
-//const int RIBBON_COUNT_LEFT = ;
-//const int RIBBON_COUNT_RIGHT = ;
 const int ABOUT_FACE_COUNT_LEFT = 330;
 
 // Other constants
 const int NUM_SENSORS = 8; // Number of sensors on the car
-const int BASE_SPEED = 130; // Default wheel speed
+const int BASE_SPEED = 140; // Default wheel speed
+const int NUM_TRAVERSALS = 1; // Number of times car should traverse path
 const int SENSOR_THRESHOLD_WHITE = 100;
 const int SENSOR_THRESHOLD_DIFF = 300;
 
-// Weighting schemes for sensor fusion. Last number is the divisor.
-double WEIGHTS_8421_4[] = {-8, -4, -2, -1, 1, 2, 4, 8, 4};
-double WEIGHTS_1514128_8[] = {-15, -14, -12, -8, 8, 12, 14, 15, 8};
+// Weighting scheme for sensor fusion. Last number is the divisor.
 double WEIGHTS_LINEAR[] = {-4, -3, -2, -1, 1, 2, 3, 4, 4};
 
+// Arrays storing sensor values
 int sensor_max_vals[NUM_SENSORS];
 int sensor_min_vals[NUM_SENSORS];
 uint16_t sensor_vals[NUM_SENSORS];
 
 double norm_val; // Stores normalized sensor value
-double speed_change; // Stores output of PID controller
-double error;
+double speed_change; // Output of PID controller
+double error; // Input of PID controller
 
 // Determine whether the car should be stopped
 double sensor_sum;
@@ -100,13 +95,13 @@ void loop() {
 
     switch (serialChar) {
       case 'P':
-        pid.set_gains(serialNum, K_I, K_D);
+        pid.set_gains(serialNum, pid.get_K_I(), pid.get_K_D());
         break;
       case 'I':
-        pid.set_gains(K_P, serialNum, K_D);
+        pid.set_gains(pid.get_K_P(), serialNum, pid.get_K_D());
         break;
       case 'D':
-        pid.set_gains(K_P, K_I, serialNum);
+        pid.set_gains(pid.get_K_P(), pid.get_K_I(), serialNum);
         break;
     }
 
@@ -136,13 +131,13 @@ void follow_path() {
   Serial.print(", BASE_SPEED: ");
   Serial.println(BASE_SPEED);
 
-  bool drive = true;
+  int i = NUM_TRAVERSALS;
 
   delay_milli(1000);
   digitalWrite(LED_FL, HIGH);
   reset_car();
  
-  while (drive) {
+  while (i > 0) {
     // Read raw sensor values
     ECE3_read_IR(sensor_vals);
 
@@ -165,15 +160,17 @@ void follow_path() {
     }
     
     if ((sensor_sum <= SENSOR_THRESHOLD_WHITE) && (sensor_max - sensor_min <= SENSOR_THRESHOLD_DIFF)) {
-      set_speed(0);
-      drive = false;
+      if (i == 1) {
+        set_speed(0);
+      } else {
+        about_face();
+        reset_car();
+      }
+      
+      i--;
     } else {
 //      pid.calculate();
       pid.tune();
-
-//        Serial.print(getEncoderCount_left());
-//        Serial.print(", ");
-//        Serial.println(getEncoderCount_right());
           
       // Adjust wheel speeds based on the output of the PID controller
       analogWrite(LEFT_PWM_PIN, BASE_SPEED - speed_change);
@@ -187,9 +184,6 @@ void follow_path() {
 // Reset PID and Encoder values
 void reset_car() {
   speed_change = 0;
-
-  resetEncoderCount_left();
-  resetEncoderCount_right();
 
   pid.reset_values();
   pid.reset_time();
