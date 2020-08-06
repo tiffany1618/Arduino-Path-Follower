@@ -21,6 +21,11 @@ public:
 
     void calculate();
 
+    double get_K_P();
+    double get_K_I();
+    double get_K_D();
+    double get_threshold();
+
 private:
     double K_P;
     double K_I;

@@ -76,3 +76,18 @@ void PID_Controller::calculate() {
     tot_error += curr_error * elapsed_time;
     prev_time = curr_time;
 }
+
+double PID_Controller::get_K_P() {
+    return K_P;
+}
+
+double PID_Controller::get_K_I() {
+    return K_I;
+}
+double PID_Controller::get_K_D() {
+    return K_D;
+}
+
+double PID_Controller::get_threshold() {
+    return threshold;
+}
