@@ -52,6 +52,10 @@ double sensor_sum;
 double sensor_min;
 double sensor_max;
 
+// Interrupts
+bool left_interrupt = false;
+bool right_interrupt = false;
+
 // Initialize PID controller
 PID_Controller pid(&error, &speed_change, 0, K_P, K_I, K_D);
 
@@ -76,16 +80,19 @@ void setup() {
   digitalWrite(LEFT_DIR_PIN, LOW);
   digitalWrite(RIGHT_DIR_PIN, LOW);
 
+  attachInterrupt(digitalPinToInterrupt(LEFT_BUTTON), left_button, FALLING);
+  attachInterrupt(digitalPinToInterrupt(RIGHT_BUTTON), right_button, FALLING);
+
   Serial.begin(9600); // Set the data rate in bits per second for serial data transmission
 }
 
 void loop() {
   // Get button input
-  if (digitalRead(RIGHT_BUTTON) == LOW) {
+  if (right_interrupt) {
     run_calibration();
   }
 
-  if (digitalRead(LEFT_BUTTON) == LOW) {
+  if (left_interrupt) {
     follow_path();
   }
 
@@ -111,6 +118,14 @@ void loop() {
     Serial.print(", K_D: ");
     Serial.println(pid.get_K_D(), 5);
   }
+}
+
+void left_button() {
+  left_interrupt = true;
+}
+
+void right_button() {
+  right_interrupt = true;
 }
 
 void run_calibration() {
