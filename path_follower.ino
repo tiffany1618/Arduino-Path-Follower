@@ -20,18 +20,20 @@ const int LED_BR = 58;
 // PID Terms
 const double K_P = 0.055;
 const double K_I = 0.0;
-const double K_D = 5.2;
-const double ERROR_THRESHOLD = 0; // Set error to 0 if the absolute value of the error is less than this threshold, to prevent small oscillations
+const double K_D = 8.0;
 
 // Encoder values
-const int ABOUT_FACE_COUNT_LEFT = 330;
+const int ABOUT_FACE_COUNT_LEFT = 250;
+const double TICKS_PER_MM = 360.0 / (70.0 * 3.1416);
+const int STOP_LINE_WIDTH = 18; // mm
 
 // Other constants
 const int NUM_SENSORS = 8; // Number of sensors on the car
 const int BASE_SPEED = 140; // Default wheel speed
 const int NUM_TRAVERSALS = 1; // Number of times car should traverse path
 const int SENSOR_THRESHOLD_WHITE = 100;
-const int SENSOR_THRESHOLD_DIFF = 300;
+const int SENSOR_THRESHOLD_BLACK = 5500;
+const int SENSOR_THRESHOLD_DIFF = 350;
 
 // Weighting scheme for sensor fusion. Last number is the divisor.
 double WEIGHTS_LINEAR[] = {-4, -3, -2, -1, 1, 2, 3, 4, 4};
@@ -51,7 +53,7 @@ double sensor_min;
 double sensor_max;
 
 // Initialize PID controller
-PID_Controller pid(&error, &speed_change, ERROR_THRESHOLD, K_P, K_I, K_D);
+PID_Controller pid(&error, &speed_change, 0, K_P, K_I, K_D);
 
 char serialChar;
 double serialNum;
@@ -76,7 +78,6 @@ void setup() {
 
   Serial.begin(9600); // Set the data rate in bits per second for serial data transmission
 }
-
 
 void loop() {
   // Get button input
@@ -132,6 +133,7 @@ void follow_path() {
   Serial.println(BASE_SPEED);
 
   int i = NUM_TRAVERSALS;
+  bool is_black = false;
 
   delay_milli(1000);
   digitalWrite(LED_FL, HIGH);
@@ -158,23 +160,36 @@ void follow_path() {
         sensor_max = sensor_vals[i];
       }
     }
-    
-    if ((sensor_sum <= SENSOR_THRESHOLD_WHITE) && (sensor_max - sensor_min <= SENSOR_THRESHOLD_DIFF)) {
-      if (i == 1) {
-        set_speed(0);
-      } else {
-        about_face();
-        reset_car();
+
+//    Serial.println(sensor_sum);
+//    Serial.println(sensor_max - sensor_min);
+
+    if ((sensor_sum >= SENSOR_THRESHOLD_BLACK) && (sensor_max - sensor_min <= SENSOR_THRESHOLD_DIFF)) {
+      Serial.println((getEncoderCount_left() + getEncoderCount_right()) / 2);
+      if (!is_black) {
+        is_black = true;
+        resetEncoderCount_left();
+        resetEncoderCount_right();
+      } else if (((getEncoderCount_left() + getEncoderCount_right()) / 2) >= 1) {
+        if (i == 1) {
+          set_speed(0);
+        } else {
+          about_face();
+          drive_forward(10);
+          reset_car();
+        }
+        
+        i--;
       }
-      
-      i--;
     } else {
-//      pid.calculate();
-      pid.tune();
+      pid.calculate();
+//      pid.tune();
           
       // Adjust wheel speeds based on the output of the PID controller
       analogWrite(LEFT_PWM_PIN, BASE_SPEED - speed_change);
       analogWrite(RIGHT_PWM_PIN, BASE_SPEED + speed_change);
+
+      is_black = false;
     }
   }
 
@@ -206,6 +221,16 @@ void about_face() {
   }
 
   digitalWrite(LEFT_DIR_PIN, LOW);
+}
+
+// Drive forward a certain amount of encoder ticks
+void drive_forward(int ticks) {
+  resetEncoderCount_left();
+  resetEncoderCount_right();
+
+  while (getEncoderCount_left() <= ticks && getEncoderCount_right() <= ticks) {
+    set_speed(BASE_SPEED);
+  }
 }
 
 // Calibrates maximum and minimum values for each of the sensors
