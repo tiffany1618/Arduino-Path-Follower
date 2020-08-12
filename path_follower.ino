@@ -20,7 +20,7 @@ const int LED_BR = 58;
 // PID Terms
 const double K_P = 0.055;
 const double K_I = 0.0;
-const double K_D = 8.0;
+const double K_D = 7.5;
 
 // Encoder values
 const int ABOUT_FACE_COUNT_LEFT = 250;
@@ -29,10 +29,10 @@ const int STOP_LINE_WIDTH = 18; // mm
 
 // Other constants
 const int NUM_SENSORS = 8; // Number of sensors on the car
-const int BASE_SPEED = 140; // Default wheel speed
+const int BASE_SPEED = 100; // Default wheel speed
 const int NUM_TRAVERSALS = 1; // Number of times car should traverse path
-const int SENSOR_THRESHOLD_WHITE = 100;
-const int SENSOR_THRESHOLD_BLACK = 5500;
+const int SENSOR_THRESHOLD_WHITE = 200;
+const int SENSOR_THRESHOLD_BLACK = 7000;
 const int SENSOR_THRESHOLD_DIFF = 350;
 
 // Weighting scheme for sensor fusion. Last number is the divisor.
@@ -137,6 +137,7 @@ void run_calibration() {
   
   calibrate(sensor_max_vals);
   digitalWrite(LED_FR, LOW);
+  right_interrupt = false;
 }
 
 void follow_path() {
@@ -153,8 +154,10 @@ void follow_path() {
   delay_milli(1000);
   digitalWrite(LED_FL, HIGH);
   reset_car();
+
+  unsigned long curr_time = millis();
  
-  while (i > 0) {
+  while (i > 0 && millis() - curr_time < 5500) {
     // Read raw sensor values
     ECE3_read_IR(sensor_vals);
 
@@ -164,14 +167,22 @@ void follow_path() {
     sensor_min = 2500;
     sensor_max = 0;
     for (int i = 0; i < NUM_SENSORS; i++) {
-      norm_val = (((double) sensor_vals[i] - sensor_min_vals[i]) * 1000) / sensor_max_vals[i];
+      if (sensor_vals[i] < sensor_min_vals[i]) {
+        sensor_min_vals[i] = sensor_vals[i];
+        norm_val = 0;
+      } else if (sensor_vals[i] > sensor_max_vals[i]) {
+        sensor_max_vals[i] = sensor_vals[i];
+        norm_val = 1000;
+      } else {
+        norm_val = ((double) (sensor_vals[i] - sensor_min_vals[i]) * 1000.0) / (sensor_max_vals[i] - sensor_min_vals[i]);       
+      }
+      
       error += norm_val * WEIGHTS_LINEAR[i] / WEIGHTS_LINEAR[NUM_SENSORS];
-
       sensor_sum += norm_val;
+      
       if (sensor_min > sensor_vals[i]) {
         sensor_min = sensor_vals[i];
-      }
-      if (sensor_max < sensor_vals[i]) {
+      } else if (sensor_max < sensor_vals[i]) {
         sensor_max = sensor_vals[i];
       }
     }
@@ -179,23 +190,24 @@ void follow_path() {
 //    Serial.println(sensor_sum);
 //    Serial.println(sensor_max - sensor_min);
 
-    if ((sensor_sum >= SENSOR_THRESHOLD_BLACK) && (sensor_max - sensor_min <= SENSOR_THRESHOLD_DIFF)) {
-      Serial.println((getEncoderCount_left() + getEncoderCount_right()) / 2);
-      if (!is_black) {
-        is_black = true;
-        resetEncoderCount_left();
-        resetEncoderCount_right();
-      } else if (((getEncoderCount_left() + getEncoderCount_right()) / 2) >= 1) {
-        if (i == 1) {
-          set_speed(0);
-        } else {
-          about_face();
-          drive_forward(10);
-          reset_car();
-        }
-        
-        i--;
-      }
+//    if ((sensor_sum >= SENSOR_THRESHOLD_BLACK)) {
+//      Serial.print("Ticks: ");
+//      Serial.println((getEncoderCount_left() + getEncoderCount_right()) / 2);
+//      if (!is_black) {
+//        is_black = true;
+//        resetEncoderCount_left();
+//        resetEncoderCount_right();
+//      } else if (((getEncoderCount_left() + getEncoderCount_right()) / 2) >= 1) {
+//        if (i > 1) {
+//          about_face();
+//          drive_forward(10);
+//          reset_car();
+//        }
+//        
+//        i--;
+//      }
+    if ((sensor_sum <= SENSOR_THRESHOLD_WHITE) && (sensor_max - sensor_min <= SENSOR_THRESHOLD_DIFF)) {
+      i--;
     } else {
       pid.calculate();
 //      pid.tune();
@@ -208,7 +220,9 @@ void follow_path() {
     }
   }
 
+  set_speed(0);
   digitalWrite(LED_FL, LOW);
+  left_interrupt = false;
 }
 
 // Reset PID and Encoder values
