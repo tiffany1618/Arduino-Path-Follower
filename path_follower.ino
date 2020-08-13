@@ -18,9 +18,9 @@ const int LED_BL = 57;
 const int LED_BR = 58;
 
 // PID Terms
-const double K_P = 0.06;
-const double K_I = 0.0;
-const double K_D = 11.0;
+const double K_P = 0.2;
+const double K_I = 0;
+const double K_D = 15;
 
 // Encoder values
 const int ABOUT_FACE_COUNT_LEFT = 250;
@@ -30,10 +30,10 @@ const int STOP_LINE_WIDTH = 18; // mm
 // Other constants
 const int NUM_SENSORS = 8; // Number of sensors on the car
 const int BASE_SPEED = 150; // Default wheel speed
-const int NUM_TRAVERSALS = 2; // Number of times car should traverse path
-const int SENSOR_THRESHOLD_WHITE = 200;
+const int NUM_TRAVERSALS = 1; // Number of times car should traverse path
 const int SENSOR_THRESHOLD_BLACK = 7500;
-const int SENSOR_THRESHOLD_DIFF = 350;
+const int SENSOR_WHITE = 200;
+const int SENSOR_DIFF = 300;
 
 // Weighting scheme for sensor fusion. Last number is the divisor.
 double WEIGHTS_LINEAR[] = {-4, -3, -2, -1, 1, 2, 3, 4, 4};
@@ -49,8 +49,6 @@ double error; // Input of PID controller
 
 // Determine whether the car should be stopped
 double sensor_sum;
-double sensor_min;
-double sensor_max;
 
 // Interrupts
 volatile bool left_interrupt = false;
@@ -89,7 +87,7 @@ void setup() {
 void loop() {
   // Get button input
   if (right_interrupt) {
-    run_calibration();
+    self_calibrate();
   }
 
   if (left_interrupt) {
@@ -128,149 +126,24 @@ void right_button() {
   right_interrupt = true;
 }
 
-void run_calibration() {
+// TIFFANY CHIEU
+// AUTO CALIBRATION CODE
+void self_calibrate() {
   digitalWrite(LED_FR, HIGH);
   calibrate_min();
-
-  // Delay for 5 seconds to allow time to position car.
   delay_milli(5000);
-  
   calibrate_max();
   digitalWrite(LED_FR, LOW);
   right_interrupt = false;
 
-  Serial.println("Max");
-  for (int i = 0; i < NUM_SENSORS; i++) {
-    Serial.println(sensor_max_vals[i]);
-  }
-  Serial.println("Min");
-  for (int i = 0; i < NUM_SENSORS; i++) {
-    Serial.println(sensor_min_vals[i]);
-  }
-}
-
-void follow_path() {
-  Serial.print("K_P: ");
-  Serial.print(pid.get_K_P(), 5);
-  Serial.print(", K_D: ");
-  Serial.print(pid.get_K_D(), 5);
-  Serial.print(", BASE_SPEED: ");
-  Serial.println(BASE_SPEED);
-
-  int i = NUM_TRAVERSALS;
-  bool write_speeds = true;
-
-  delay_milli(1000);
-  digitalWrite(LED_FL, HIGH);
-  reset_car();
-
-  unsigned long curr_time = millis();
-  int black_start_ticks = 0;
-  int last_trigger_time = 0;
-  int black_trigger_timeout = 0;
- 
-  while (i > 0) {
-    // Read raw sensor values
-    ECE3_read_IR(sensor_vals);
-
-    // Calculate error
-    error = 0;
-    sensor_sum = 0;
-    sensor_min = 2500;
-    sensor_max = 0;
-    for (int i = 0; i < NUM_SENSORS; i++) {
-      norm_val = ((double) (sensor_vals[i] - sensor_min_vals[i]) * 1000.0) / sensor_max_vals[i];             
-      error += norm_val * WEIGHTS_LINEAR[i] / WEIGHTS_LINEAR[NUM_SENSORS];
-      sensor_sum += norm_val;
-      
-      if (sensor_min > sensor_vals[i]) {
-        sensor_min = sensor_vals[i];
-      } else if (sensor_max < sensor_vals[i]) {
-        sensor_max = sensor_vals[i];
-      }
-    }
-
-    if (sensor_sum >= SENSOR_THRESHOLD_BLACK && (millis() - last_trigger_time) > black_trigger_timeout) {
-      int current_ticks = (getEncoderCount_left() + getEncoderCount_right()) / 2;
-      int dist_since_black = (current_ticks - black_start_ticks) / TICKS_PER_MM;
-      black_trigger_timeout = 0;
-      last_trigger_time = millis();
-
-      if (dist_since_black > (STOP_LINE_WIDTH + 5)) {
-        black_start_ticks = current_ticks;
-      } else if (dist_since_black >= (STOP_LINE_WIDTH - 10)) {
-        if (i > 1) {
-          about_face();
-          drive_forward(360);
-          reset_car();
-          black_start_ticks = -30;
-          black_trigger_timeout = 1000;
-        }
-         
-        i--;
-      }
-    } else {
-      pid.calculate();
-//      pid.tune();
-      
-      // Adjust wheel speeds based on the output of the PID controller
-      int left_speed = BASE_SPEED - speed_change;
-      int right_speed = BASE_SPEED + speed_change;
-
-      if (left_speed > 255) {
-        left_speed = 255;
-      }
-      if (right_speed > 255) {
-        right_speed = 255;
-      }
-
-      analogWrite(LEFT_PWM_PIN, left_speed);
-      analogWrite(RIGHT_PWM_PIN, right_speed);
-    }
-  }
-
-  set_speed(0);
-  digitalWrite(LED_FL, LOW);
-  left_interrupt = false;
-}
-
-// Reset PID and Encoder values
-void reset_car() {
-  speed_change = 0;
-
-  pid.reset_values();
-  pid.reset_time();
-}
-
-// Set both wheels to the same speed
-void set_speed(int speed) {
-  analogWrite(LEFT_PWM_PIN, speed);
-  analogWrite(RIGHT_PWM_PIN, speed);
-}
-
-// Turn car 180 degrees around
-void about_face() {
-  set_speed(0);
-  delay_milli(100);
-  digitalWrite(LEFT_DIR_PIN, HIGH);
-  resetEncoderCount_left();
-  resetEncoderCount_right();
-
-  while (getEncoderCount_left() <= ABOUT_FACE_COUNT_LEFT) {
-    set_speed(150);
-  }
-
-  digitalWrite(LEFT_DIR_PIN, LOW);
-}
-
-// Drive forward a certain amount of encoder ticks
-void drive_forward(int ticks) {
-  resetEncoderCount_left();
-  resetEncoderCount_right();
-
-  while (getEncoderCount_left() <= ticks && getEncoderCount_right() <= ticks) {
-    set_speed(150);
-  }
+//  Serial.println("Max");
+//  for (int i = 0; i < NUM_SENSORS; i++) {
+//    Serial.println(sensor_max_vals[i]);
+//  }
+//  Serial.println("Min");
+//  for (int i = 0; i < NUM_SENSORS; i++) {
+//    Serial.println(sensor_min_vals[i]);
+//  }
 }
 
 // Calibrates minimum values for each of the sensors
@@ -309,6 +182,136 @@ void calibrate_max() {
   }
 
   blink_twice(LED_BL);
+}
+// END AUTO CALIBRATION CODE
+
+// PATH FOLLOWING CODE WITH PID CONTROLLER
+void follow_path() {
+  Serial.print("K_P: ");
+  Serial.print(pid.get_K_P(), 5);
+  Serial.print(", K_D: ");
+  Serial.print(pid.get_K_D(), 5);
+  Serial.print(", BASE_SPEED: ");
+  Serial.println(BASE_SPEED);
+
+  int i = NUM_TRAVERSALS;
+  int left_speed, right_speed;
+  int current_ticks, dist_since_black, black_start_ticks = 0;
+  int last_trigger_time = 0, black_trigger_timeout = 0;
+
+  delay_milli(1000);
+  digitalWrite(LED_FL, HIGH);
+  reset_car();
+
+  unsigned long curr_time = millis();
+ 
+  while (i > 0 && millis() - curr_time < 5000) {
+    // Read raw sensor values
+    ECE3_read_IR(sensor_vals);
+
+    // Calculate error
+    error = 0;
+    sensor_sum = 0;
+    int sensor_min = 2500, sensor_max = 0;
+    for (int i = 0; i < NUM_SENSORS; i++) {
+      norm_val = ((double) (sensor_vals[i] - sensor_min_vals[i]) * 1000.0) / sensor_max_vals[i];             
+      error += norm_val * WEIGHTS_LINEAR[i] / WEIGHTS_LINEAR[NUM_SENSORS];
+      sensor_sum += norm_val;
+
+      if (sensor_min > sensor_vals[i]) {
+        sensor_min = sensor_vals[i];
+      }
+      if (sensor_max < sensor_vals[i]) {
+        sensor_max = sensor_vals[i];
+      }
+    }
+
+    if (sensor_sum <= SENSOR_WHITE && sensor_max - sensor_min <= SENSOR_DIFF) {
+      set_speed(0);
+      i = 0;
+    }
+
+    // Check if car has crossed a black area wide enough to be the end line using encoder ticks
+    // black_trigger_timeout prevents the car from stopping after immediately crossing the end line again after turning around
+    if (sensor_sum >= SENSOR_THRESHOLD_BLACK && (millis() - last_trigger_time) > black_trigger_timeout) {
+      current_ticks = (getEncoderCount_left() + getEncoderCount_right()) / 2;
+      dist_since_black = (current_ticks - black_start_ticks) / TICKS_PER_MM;
+      black_trigger_timeout = 0;
+      last_trigger_time = millis();
+
+      if (dist_since_black > (STOP_LINE_WIDTH + 5)) {
+        black_start_ticks = current_ticks;
+      } else if (dist_since_black >= (STOP_LINE_WIDTH - 10)) {
+        if (i > 1) {
+          about_face();
+          drive_forward(360);
+          reset_car();
+          black_start_ticks = -30;
+          black_trigger_timeout = 1000;
+        }
+         
+        i--;
+      }
+    } else {
+      pid.calculate();
+      Serial.println(error);
+      
+      // Adjust wheel speeds based on the output of the PID controller
+      left_speed = BASE_SPEED - speed_change;
+      right_speed = BASE_SPEED + speed_change;
+
+      // Ensure the PID Controller does not give speed values over 255
+      if (left_speed > 255) left_speed = 255;
+      if (right_speed > 255) right_speed = 255;
+
+      analogWrite(LEFT_PWM_PIN, left_speed);
+      analogWrite(RIGHT_PWM_PIN, right_speed);
+    }
+  }
+
+  set_speed(0);
+  digitalWrite(LED_FL, LOW);
+  left_interrupt = false;
+}
+
+// Reset PID values
+void reset_car() {
+  speed_change = 0;
+
+  pid.reset_values();
+  pid.reset_time();
+}
+
+// Set both wheels to the same speed
+void set_speed(int speed) {
+  analogWrite(LEFT_PWM_PIN, speed);
+  analogWrite(RIGHT_PWM_PIN, speed);
+}
+
+// Turn car 180 degrees around
+void about_face() {
+  set_speed(0);
+  delay_milli(50);
+  digitalWrite(LEFT_DIR_PIN, HIGH);
+  resetEncoderCount_left();
+  resetEncoderCount_right();
+
+  while (getEncoderCount_left() <= ABOUT_FACE_COUNT_LEFT) {
+    set_speed(150);
+  }
+
+  digitalWrite(LEFT_DIR_PIN, LOW);
+  delay_milli(50);
+}
+
+// Drive forward a certain amount of encoder ticks
+void drive_forward(int ticks) {
+  resetEncoderCount_left();
+  resetEncoderCount_right();
+
+  while (getEncoderCount_left() <= ticks && getEncoderCount_right() <= ticks) {
+    set_speed(150);
+  }
 }
 
 // Blink LED twice at half second interval
