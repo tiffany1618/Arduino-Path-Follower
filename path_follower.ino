@@ -18,19 +18,19 @@ const int LED_BL = 57;
 const int LED_BR = 58;
 
 // PID Terms
-const double K_P = 0.2;
+const double K_P = 0.08;
 const double K_I = 0;
-const double K_D = 15;
+const double K_D = 16.0;
 
 // Encoder values
-const int ABOUT_FACE_COUNT_LEFT = 250;
+const int ABOUT_FACE_COUNT_LEFT = 315;
 const double TICKS_PER_MM = 360.0 / (70.0 * 3.1416);
 const int STOP_LINE_WIDTH = 18; // mm
 
 // Other constants
 const int NUM_SENSORS = 8; // Number of sensors on the car
 const int BASE_SPEED = 150; // Default wheel speed
-const int NUM_TRAVERSALS = 1; // Number of times car should traverse path
+const int NUM_TRAVERSALS = 2; // Number of times car should traverse path
 const int SENSOR_THRESHOLD_BLACK = 7500;
 const int SENSOR_WHITE = 200;
 const int SENSOR_DIFF = 300;
@@ -46,6 +46,7 @@ uint16_t sensor_vals[NUM_SENSORS];
 double norm_val; // Stores normalized sensor value
 double speed_change; // Output of PID controller
 double error; // Input of PID controller
+int curr_speed;
 
 // Determine whether the car should be stopped
 double sensor_sum;
@@ -113,6 +114,8 @@ void loop() {
 
     Serial.print("K_P: ");
     Serial.print(pid.get_K_P(), 5);
+    Serial.print(", K_I: ");
+    Serial.print(pid.get_K_I(), 5);
     Serial.print(", K_D: ");
     Serial.println(pid.get_K_D(), 5);
   }
@@ -189,6 +192,8 @@ void calibrate_max() {
 void follow_path() {
   Serial.print("K_P: ");
   Serial.print(pid.get_K_P(), 5);
+  Serial.print(", K_I: ");
+  Serial.print(pid.get_K_I(), 5);
   Serial.print(", K_D: ");
   Serial.print(pid.get_K_D(), 5);
   Serial.print(", BASE_SPEED: ");
@@ -198,6 +203,7 @@ void follow_path() {
   int left_speed, right_speed;
   int current_ticks, dist_since_black, black_start_ticks = 0;
   int last_trigger_time = 0, black_trigger_timeout = 0;
+  curr_speed = 0;
 
   delay_milli(1000);
   digitalWrite(LED_FL, HIGH);
@@ -205,7 +211,7 @@ void follow_path() {
 
   unsigned long curr_time = millis();
  
-  while (i > 0 && millis() - curr_time < 5000) {
+  while (i > 0) {
     // Read raw sensor values
     ECE3_read_IR(sensor_vals);
 
@@ -227,13 +233,22 @@ void follow_path() {
     }
 
     if (sensor_sum <= SENSOR_WHITE && sensor_max - sensor_min <= SENSOR_DIFF) {
-      set_speed(0);
-      i = 0;
-    }
-
-    // Check if car has crossed a black area wide enough to be the end line using encoder ticks
-    // black_trigger_timeout prevents the car from stopping after immediately crossing the end line again after turning around
-    if (sensor_sum >= SENSOR_THRESHOLD_BLACK && (millis() - last_trigger_time) > black_trigger_timeout) {
+      black_trigger_timeout = 0;
+      last_trigger_time = millis();
+      
+      if (i > 1) {
+        about_face();
+        drive_forward(100);
+        curr_speed = 100;
+//          reset_car();
+        black_start_ticks = -30;
+        black_trigger_timeout = 1000;
+      }
+       
+      i--;
+    } else if (sensor_sum >= SENSOR_THRESHOLD_BLACK && (millis() - last_trigger_time) > black_trigger_timeout) {
+      // Check if car has crossed a black area wide enough to be the end line using encoder ticks
+      // black_trigger_timeout prevents the car from stopping after immediately crossing the end line again after turning around
       current_ticks = (getEncoderCount_left() + getEncoderCount_right()) / 2;
       dist_since_black = (current_ticks - black_start_ticks) / TICKS_PER_MM;
       black_trigger_timeout = 0;
@@ -241,11 +256,12 @@ void follow_path() {
 
       if (dist_since_black > (STOP_LINE_WIDTH + 5)) {
         black_start_ticks = current_ticks;
-      } else if (dist_since_black >= (STOP_LINE_WIDTH - 10)) {
+      } else if (dist_since_black >= (STOP_LINE_WIDTH - 8)) {
         if (i > 1) {
           about_face();
-          drive_forward(360);
-          reset_car();
+          drive_forward(100);
+          curr_speed = 100;
+//          reset_car();
           black_start_ticks = -30;
           black_trigger_timeout = 1000;
         }
@@ -254,11 +270,16 @@ void follow_path() {
       }
     } else {
       pid.calculate();
-      Serial.println(error);
-      
+//      Serial.println(error);
+
+      // Basic acceleration control to prevent wheel slippage
+      if (curr_speed < BASE_SPEED) {
+        curr_speed += 5;
+      }
+
       // Adjust wheel speeds based on the output of the PID controller
-      left_speed = BASE_SPEED - speed_change;
-      right_speed = BASE_SPEED + speed_change;
+      left_speed = curr_speed - speed_change;
+      right_speed = curr_speed + speed_change;
 
       // Ensure the PID Controller does not give speed values over 255
       if (left_speed > 255) left_speed = 255;
@@ -297,7 +318,7 @@ void about_face() {
   resetEncoderCount_right();
 
   while (getEncoderCount_left() <= ABOUT_FACE_COUNT_LEFT) {
-    set_speed(150);
+    set_speed(100);
   }
 
   digitalWrite(LEFT_DIR_PIN, LOW);
@@ -306,12 +327,15 @@ void about_face() {
 
 // Drive forward a certain amount of encoder ticks
 void drive_forward(int ticks) {
+  digitalWrite(LED_BL, HIGH);
   resetEncoderCount_left();
   resetEncoderCount_right();
 
   while (getEncoderCount_left() <= ticks && getEncoderCount_right() <= ticks) {
-    set_speed(150);
+    set_speed(100);
   }
+
+  digitalWrite(LED_BL, LOW);
 }
 
 // Blink LED twice at half second interval
