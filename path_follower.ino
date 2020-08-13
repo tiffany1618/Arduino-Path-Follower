@@ -18,9 +18,9 @@ const int LED_BL = 57;
 const int LED_BR = 58;
 
 // PID Terms
-const double K_P = 0.055;
+const double K_P = 0.06;
 const double K_I = 0.0;
-const double K_D = 7.5;
+const double K_D = 11.0;
 
 // Encoder values
 const int ABOUT_FACE_COUNT_LEFT = 250;
@@ -29,10 +29,10 @@ const int STOP_LINE_WIDTH = 18; // mm
 
 // Other constants
 const int NUM_SENSORS = 8; // Number of sensors on the car
-const int BASE_SPEED = 100; // Default wheel speed
-const int NUM_TRAVERSALS = 1; // Number of times car should traverse path
+const int BASE_SPEED = 150; // Default wheel speed
+const int NUM_TRAVERSALS = 2; // Number of times car should traverse path
 const int SENSOR_THRESHOLD_WHITE = 200;
-const int SENSOR_THRESHOLD_BLACK = 7000;
+const int SENSOR_THRESHOLD_BLACK = 7500;
 const int SENSOR_THRESHOLD_DIFF = 350;
 
 // Weighting scheme for sensor fusion. Last number is the divisor.
@@ -53,8 +53,8 @@ double sensor_min;
 double sensor_max;
 
 // Interrupts
-bool left_interrupt = false;
-bool right_interrupt = false;
+volatile bool left_interrupt = false;
+volatile bool right_interrupt = false;
 
 // Initialize PID controller
 PID_Controller pid(&error, &speed_change, 0, K_P, K_I, K_D);
@@ -130,14 +130,23 @@ void right_button() {
 
 void run_calibration() {
   digitalWrite(LED_FR, HIGH);
-  calibrate(sensor_min_vals);
+  calibrate_min();
 
   // Delay for 5 seconds to allow time to position car.
   delay_milli(5000);
   
-  calibrate(sensor_max_vals);
+  calibrate_max();
   digitalWrite(LED_FR, LOW);
   right_interrupt = false;
+
+  Serial.println("Max");
+  for (int i = 0; i < NUM_SENSORS; i++) {
+    Serial.println(sensor_max_vals[i]);
+  }
+  Serial.println("Min");
+  for (int i = 0; i < NUM_SENSORS; i++) {
+    Serial.println(sensor_min_vals[i]);
+  }
 }
 
 void follow_path() {
@@ -149,15 +158,18 @@ void follow_path() {
   Serial.println(BASE_SPEED);
 
   int i = NUM_TRAVERSALS;
-  bool is_black = false;
+  bool write_speeds = true;
 
   delay_milli(1000);
   digitalWrite(LED_FL, HIGH);
   reset_car();
 
   unsigned long curr_time = millis();
+  int black_start_ticks = 0;
+  int last_trigger_time = 0;
+  int black_trigger_timeout = 0;
  
-  while (i > 0 && millis() - curr_time < 5500) {
+  while (i > 0) {
     // Read raw sensor values
     ECE3_read_IR(sensor_vals);
 
@@ -167,16 +179,7 @@ void follow_path() {
     sensor_min = 2500;
     sensor_max = 0;
     for (int i = 0; i < NUM_SENSORS; i++) {
-      if (sensor_vals[i] < sensor_min_vals[i]) {
-        sensor_min_vals[i] = sensor_vals[i];
-        norm_val = 0;
-      } else if (sensor_vals[i] > sensor_max_vals[i]) {
-        sensor_max_vals[i] = sensor_vals[i];
-        norm_val = 1000;
-      } else {
-        norm_val = ((double) (sensor_vals[i] - sensor_min_vals[i]) * 1000.0) / (sensor_max_vals[i] - sensor_min_vals[i]);       
-      }
-      
+      norm_val = ((double) (sensor_vals[i] - sensor_min_vals[i]) * 1000.0) / sensor_max_vals[i];             
       error += norm_val * WEIGHTS_LINEAR[i] / WEIGHTS_LINEAR[NUM_SENSORS];
       sensor_sum += norm_val;
       
@@ -187,36 +190,42 @@ void follow_path() {
       }
     }
 
-//    Serial.println(sensor_sum);
-//    Serial.println(sensor_max - sensor_min);
+    if (sensor_sum >= SENSOR_THRESHOLD_BLACK && (millis() - last_trigger_time) > black_trigger_timeout) {
+      int current_ticks = (getEncoderCount_left() + getEncoderCount_right()) / 2;
+      int dist_since_black = (current_ticks - black_start_ticks) / TICKS_PER_MM;
+      black_trigger_timeout = 0;
+      last_trigger_time = millis();
 
-//    if ((sensor_sum >= SENSOR_THRESHOLD_BLACK)) {
-//      Serial.print("Ticks: ");
-//      Serial.println((getEncoderCount_left() + getEncoderCount_right()) / 2);
-//      if (!is_black) {
-//        is_black = true;
-//        resetEncoderCount_left();
-//        resetEncoderCount_right();
-//      } else if (((getEncoderCount_left() + getEncoderCount_right()) / 2) >= 1) {
-//        if (i > 1) {
-//          about_face();
-//          drive_forward(10);
-//          reset_car();
-//        }
-//        
-//        i--;
-//      }
-    if ((sensor_sum <= SENSOR_THRESHOLD_WHITE) && (sensor_max - sensor_min <= SENSOR_THRESHOLD_DIFF)) {
-      i--;
+      if (dist_since_black > (STOP_LINE_WIDTH + 5)) {
+        black_start_ticks = current_ticks;
+      } else if (dist_since_black >= (STOP_LINE_WIDTH - 10)) {
+        if (i > 1) {
+          about_face();
+          drive_forward(360);
+          reset_car();
+          black_start_ticks = -30;
+          black_trigger_timeout = 1000;
+        }
+         
+        i--;
+      }
     } else {
       pid.calculate();
 //      pid.tune();
-          
+      
       // Adjust wheel speeds based on the output of the PID controller
-      analogWrite(LEFT_PWM_PIN, BASE_SPEED - speed_change);
-      analogWrite(RIGHT_PWM_PIN, BASE_SPEED + speed_change);
+      int left_speed = BASE_SPEED - speed_change;
+      int right_speed = BASE_SPEED + speed_change;
 
-      is_black = false;
+      if (left_speed > 255) {
+        left_speed = 255;
+      }
+      if (right_speed > 255) {
+        right_speed = 255;
+      }
+
+      analogWrite(LEFT_PWM_PIN, left_speed);
+      analogWrite(RIGHT_PWM_PIN, right_speed);
     }
   }
 
@@ -241,12 +250,14 @@ void set_speed(int speed) {
 
 // Turn car 180 degrees around
 void about_face() {
+  set_speed(0);
+  delay_milli(100);
   digitalWrite(LEFT_DIR_PIN, HIGH);
   resetEncoderCount_left();
   resetEncoderCount_right();
 
   while (getEncoderCount_left() <= ABOUT_FACE_COUNT_LEFT) {
-    set_speed(BASE_SPEED);
+    set_speed(150);
   }
 
   digitalWrite(LEFT_DIR_PIN, LOW);
@@ -258,30 +269,46 @@ void drive_forward(int ticks) {
   resetEncoderCount_right();
 
   while (getEncoderCount_left() <= ticks && getEncoderCount_right() <= ticks) {
-    set_speed(BASE_SPEED);
+    set_speed(150);
   }
 }
 
-// Calibrates maximum and minimum values for each of the sensors
-void calibrate(int *vals) {
-  zero(vals);
+// Calibrates minimum values for each of the sensors
+void calibrate_min() {
+  for (int i = 0; i < NUM_SENSORS; i++) {
+    sensor_min_vals[i] = 2500;
+  }
   
-  for (int i = 0; i < 10; i++) {
+  for (int i = 0; i < 20; i++) {
     ECE3_read_IR(sensor_vals);
 
     for (int j = 0; j < NUM_SENSORS; j++) {
-      vals[j] += (double) sensor_vals[j] / 10;
+      if (sensor_vals[i] < sensor_min_vals[i]) {
+        sensor_min_vals[i] = sensor_vals[i];
+      }
     }
   }
 
   blink_twice(LED_BL);
 }
 
-// Sets all values of array to 0
-void zero(int *vals) {
+// Calibrates maximum values for each of the sensors
+void calibrate_max() {
   for (int i = 0; i < NUM_SENSORS; i++) {
-    vals[i] = 0;
+    sensor_max_vals[i] = 0;
   }
+  
+  for (int i = 0; i < 20; i++) {
+    ECE3_read_IR(sensor_vals);
+
+    for (int j = 0; j < NUM_SENSORS; j++) {
+      if (sensor_vals[i] > (sensor_max_vals[i] + sensor_min_vals[i])) {
+        sensor_max_vals[i] = sensor_vals[i] - sensor_min_vals[i];
+      }
+    }
+  }
+
+  blink_twice(LED_BL);
 }
 
 // Blink LED twice at half second interval
