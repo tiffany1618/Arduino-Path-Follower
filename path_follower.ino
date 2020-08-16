@@ -18,9 +18,9 @@ const int LED_BL = 57;
 const int LED_BR = 58;
 
 // PID Terms
-const double K_P = 0.08;
+const double K_P = 0.134;
 const double K_I = 0;
-const double K_D = 16.0;
+const double K_D = 18.0;
 
 // Encoder values
 const int ABOUT_FACE_COUNT_LEFT = 315;

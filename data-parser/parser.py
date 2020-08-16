@@ -128,7 +128,7 @@ def data_fusion(filename):
         reader = csv.reader(norm_data)
         writer = csv.writer(fusion_data)
         row_weights = [0, 0, 0]
-        writer.writerow(["(8-4-2-1)/4", "(15-14-12-8)/8", 'linear'])
+        writer.writerow(["(8-4-2-1)/4", "(15-14-12-8)/8", '(4-3-2-1)/4'])
 
         next(reader)
         for row in reader:
@@ -158,7 +158,27 @@ def graph_csv(filename, graph_name):
             plt.plot(x, sensor_data[i], label=header[i], marker='o')
 
         plt.legend()
-        plt.grid()
-        plt.xlabel("Error")
+        plt.grid(b=True, which='major')
+        plt.minorticks_on()
+        plt.grid(b=True, which='minor', alpha=0.5)
+        plt.ylabel("Sensor Data")
+        plt.xlabel("Error (mm)")
         plt.title(graph_name)
         plt.show()
+
+
+def truncate_data(filename):
+    with open(os.path.join(PATH, filename), "r") as long_file, open(os.path.join(PATH, "short.csv"), "w") as short_file:
+        reader = csv.reader(long_file)
+        writer = csv.writer(short_file)
+        header = next(reader)
+        writer.writerow(header)
+        length = len(header)
+        write_row = []
+
+        for row in reader:
+            for i in range(length):
+                write_row.append('%.2f'%(float(row[i])))
+
+            writer.writerow(write_row)
+            write_row = []
